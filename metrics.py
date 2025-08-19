@@ -97,7 +97,7 @@ async def get_metrics(transcript):
 
     prompt = get_metrics_prompt.format(transcript = transcript)
 
-    llm = ChatOpenAI(model="gpt-4o").with_structured_output(MainClass)
+    llm = ChatOpenAI(model="gpt-4o").with_structured_output(MainClass).with_retry(stop_after_attempt=3)
     result = await llm.ainvoke(prompt)
 
     return result

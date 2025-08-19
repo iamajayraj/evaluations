@@ -1,28 +1,46 @@
+from operator import le
 from fastapi import FastAPI, Depends, Request, HTTPException, BackgroundTasks
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any, Dict, List
 import asyncio
 import httpx
+from urllib.parse import urlparse
 import os
 from dotenv import load_dotenv
 from qa import get_questions_answers, get_context_answers, get_hk_chatbot_answer
 from evaluators import hallucination
-from escalation import get_escalation_rate
 from metrics import get_metrics
 from silence import get_silence_time
+import warnings
+from pydantic.json_schema import PydanticJsonSchemaWarning
+
+warnings.filterwarnings("ignore", category=PydanticJsonSchemaWarning)
 
 load_dotenv()
+
 
 RETELL_BASE_URL = os.getenv("RETELL_BASE_URL")
 RETELL_API_KEY = os.getenv("RETELL_API_KEY")
 
+# --- ENV VALIDATION ---
+if not RETELL_BASE_URL:
+    raise RuntimeError("RETELL_BASE_URL is missing")
+parsed = urlparse(RETELL_BASE_URL)
+if not parsed.scheme or parsed.scheme not in {"http", "https"}:
+    raise RuntimeError("RETELL_BASE_URL must start with http:// or https://")
+
+if not RETELL_API_KEY:
+    raise RuntimeError("RETELL_API_KEY is missing")
+
+
+
 app = FastAPI()
 
 class CallPayload(BaseModel):
-    limit: int
-    agent_id: str
-    duration_min: int
-    duration_max: int
+    limit: int = Field(gt=0, le=200, description="Max calls to fetch (1-200)")
+    agent_id: str = Field(min_length=1, description="Retell agent id")
+    duration_min: int = Field(gt=60, description="Min duration in seconds")
+    duration_max: int = Field(le=1200, description="Max duration in seconds")
 
 # ---- Fake data fetcher (replace with your real get_calls) ----
 async def get_calls(limit: int, agent_id: str, duration_min: int, duration_max: int) -> List[Dict[str, Any]]:
@@ -35,6 +53,7 @@ async def get_calls(limit: int, agent_id: str, duration_min: int, duration_max: 
         "filter_criteria": {
             "agent_id": [agent_id],
             "call_status": ["ended"],
+            "disconnection_reason": ["user_hangup","agent_hangup","call_transfer"],
             "duration_ms": {
                 "upper_threshold": int(duration_max)*1000,
                 "lower_threshold": int(duration_min)*1000
@@ -63,6 +82,8 @@ async def correctness(payload: CallPayload):
     batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max)
     tasks = [get_questions_answers(call_data) for call_data in batch]
     results = await asyncio.gather(*tasks)
+    if not results:
+        raise HTTPException(status_code=404, detail="No calls found")
 
     batch_ques_ans = [
     {"call_id": call_data["call_id"], "qa_pairs": qa_pairs}
@@ -108,6 +129,7 @@ async def metrics(payload: CallPayload):
     batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max)
     
     final_payload = {}
+    final_payload["call_id"] = [call_data["call_id"] for call_data in batch]
 
     #silence time
     individual_silence_time_percall = []
@@ -120,7 +142,10 @@ async def metrics(payload: CallPayload):
     final_payload["silence_time"] = {}
     final_payload["silence_time"]["per_call"] = total_silence_time_percall
     final_payload["silence_time"]["total_call_time"] = total_call_time_percall
-    final_payload["silence_time"]["avg_silence_time_per_min"] = sum(total_silence_time_percall)/(sum(total_call_time_percall)/60)
+    if sum(total_call_time_percall)>0 and sum(total_silence_time_percall)>0:
+        final_payload["silence_time"]["avg_silence_time_per_min"] = sum(total_silence_time_percall)/(sum(total_call_time_percall))/60
+    else:
+        final_payload["silence_time"]["avg_silence_time_per_min"] = 0
 
     individual_silence_time_count = {
         "silence time more than 10 seconds":0,
