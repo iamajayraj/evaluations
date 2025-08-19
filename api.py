@@ -1,5 +1,6 @@
 from operator import le
 from fastapi import FastAPI, Depends, Request, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List
 import asyncio
@@ -35,6 +36,15 @@ if not RETELL_API_KEY:
 
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],          # any origin
+    allow_credentials=False,      # must be False when using "*"
+    allow_methods=["*"],          # or list: ["GET","POST","PUT","DELETE","OPTIONS"]
+    allow_headers=["*"],          # or list: ["Content-Type","Authorization",...]
+    max_age=600,                  # cache preflight (seconds)
+)
 
 class CallPayload(BaseModel):
     limit: int = Field(gt=0, le=200, description="Max calls to fetch (1-200)")
