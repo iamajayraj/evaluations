@@ -1,16 +1,23 @@
 def get_silence_time(call_data):
-
-    total_silence_time = 0
-    individual_silence_time = []
+    silence_time_data = []
+    user_idx = 0
+    agent_idx = 0
     for idx,i in enumerate(call_data["transcript_object"]):
         if i['role'] == "user":
-            last_word_endtime = i["words"][-1]["end"]
-            for j in call_data["transcript_object"][idx:]:
-                if j['role'] == "agent":
-                    first_word_starttime = j["words"][0]["start"]
-                    silence_time = first_word_starttime - last_word_endtime
-                    individual_silence_time.append(silence_time)
-                    total_silence_time+=silence_time
-                    break
-                
-    return total_silence_time, individual_silence_time
+            user_idx = idx
+            if len(call_data["transcript_object"]) == user_idx + 1:
+                break
+            else:
+                if call_data["transcript_object"][user_idx+1]['role'] == "agent":
+                    user_last_word_endtime = i["words"][-1]["end"]
+                    agent_first_word_starttime = call_data["transcript_object"][user_idx+1]["words"][0]["start"]
+                    silence_time = agent_first_word_starttime - user_last_word_endtime
+                    query = call_data["transcript_object"][user_idx]["content"]
+                    silence_time_data.append({
+                        "start": user_last_word_endtime,
+                        "end": agent_first_word_starttime,
+                        "duration": silence_time,
+                        "query": query
+                    })
+
+    return silence_time_data
