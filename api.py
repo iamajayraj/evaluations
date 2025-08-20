@@ -145,8 +145,10 @@ async def metrics(payload: CallPayload):
     individual_silence_time_percall = []
     total_silence_time_percall = []
     for call_data in batch:
-        total, individual = get_silence_time(call_data)
+        silence_time_data = get_silence_time(call_data)
+        individual = [silence_time["duration"] for silence_time in silence_time_data]
         individual_silence_time_percall.append(individual)
+        total = sum(individual)
         total_silence_time_percall.append(total)
     total_call_time_percall = [call_data["duration_ms"]/1000 for call_data in batch]
     final_payload["silence_time"] = {}
@@ -157,26 +159,29 @@ async def metrics(payload: CallPayload):
     else:
         final_payload["silence_time"]["avg_silence_time_per_min"] = 0
 
+    final_payload["silence_time"]['individual_silence_time_percall'] = individual_silence_time_percall
+
     individual_silence_time_count = {
-        "silence time more than 10 seconds":0,
-        "silence time more than 8 seconds":0,
-        "silence time more than 6 seconds":0,
-        "silence time more than 4 seconds":0,
-        "silence time more than 2 seconds":0,
+    "silence time more than 5 seconds": 0,
+    "silence time more than 4 seconds": 0,
+    "silence time more than 3 seconds": 0,
+    "silence time more than 2 seconds": 0,
+    "silence time more than 1 seconds": 0,
     }
 
     for call in individual_silence_time_percall:
-        for silence_time in call:
-            if silence_time>10.0:
-                individual_silence_time_count["silence time more than 10 seconds"]+=1
-            elif silence_time>8.0 and silence_time<=10.0:
-                individual_silence_time_count["silence time more than 8 seconds"]+=1
-            elif silence_time>6.0 and silence_time<=8.0:
-                individual_silence_time_count["silence time more than 6 seconds"]+=1
-            elif silence_time>4.0 and silence_time<=6.0:
-                individual_silence_time_count["silence time more than 4 seconds"]+=1
-            elif silence_time>2.0 and silence_time<=4.0:
-                individual_silence_time_count["silence time more than 2 seconds"]+=1
+        for time in call:
+            if time > 5.0:
+                individual_silence_time_count["silence time more than 5 seconds"] += 1
+            elif time > 4.0 and time <= 5.0:
+                individual_silence_time_count["silence time more than 4 seconds"] += 1
+            elif time > 3.0 and time <= 4.0:
+                individual_silence_time_count["silence time more than 3 seconds"] += 1
+            elif time > 2.0 and time <= 3.0:   
+                individual_silence_time_count["silence time more than 2 seconds"] += 1
+            elif time > 1.0 and time <= 2.0:
+                individual_silence_time_count["silence time more than 1 seconds"] += 1
+
 
     final_payload["silence_time"]["individual_silence_time_count"] = individual_silence_time_count
 
