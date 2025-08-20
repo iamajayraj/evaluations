@@ -153,7 +153,7 @@ async def metrics(payload: CallPayload):
     final_payload["silence_time"]["per_call"] = total_silence_time_percall
     final_payload["silence_time"]["total_call_time"] = total_call_time_percall
     if sum(total_call_time_percall)>0 and sum(total_silence_time_percall)>0:
-        final_payload["silence_time"]["avg_silence_time_per_min"] = sum(total_silence_time_percall)/(sum(total_call_time_percall))/60
+        final_payload["silence_time"]["avg_silence_time_per_min"] = sum(total_silence_time_percall)/((sum(total_call_time_percall))/60)
     else:
         final_payload["silence_time"]["avg_silence_time_per_min"] = 0
 
