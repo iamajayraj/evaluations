@@ -1,0 +1,120 @@
+import fitz  # PyMuPDF
+import tempfile
+import os
+from docling.document_converter import DocumentConverter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain.embeddings import init_embeddings
+from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_core.documents import Document
+
+from dotenv import load_dotenv
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+def table_name(page, table):
+    finder = page.get_text("blocks")
+    table_block = [block for block in finder if block[1]<table.bbox[1]]
+    if table_block:
+        return table_block[-1][4].strip()
+    else:
+        return None
+
+def parse_pdf(file_bytes: bytes):
+
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    parsed_content = []
+    for pno, page in enumerate(doc):
+
+        # Extract full text
+        page_text = page.get_text("text")
+
+        #Extract tables
+        page_tables = page.find_tables()
+        tables = []
+        for t_idx, table in enumerate(page_tables.tables):
+            cells = table.extract()[:]
+            # Add table name if available
+            if table_name(page, table):
+                table_title = table_name(page, table)
+            else:
+                table_title = "Table Title Unavailable"
+            table_data = {"table_index": t_idx,
+                            "table_title": table_title, 
+                          "cells": cells,
+                          "table": table.to_pandas().astype(str).to_markdown(index=False)}
+            tables.append(table_data)
+
+        # Extract images
+        images = page.get_images(full=True)
+        image_data = []
+        for img_idx,img in enumerate(images):
+            img_info = doc.extract_image(img[0])
+            img_info = {"image_index": img_idx,
+                        "image_bytes":img_info["image"],
+                        "image_extension": img_info["ext"]}
+            image_data.append(img_info)
+
+        parsed_content.append({
+            "page_number": pno,
+            "page_text": page_text,
+            "page_tables": tables,
+            "page_images": image_data
+        })
+
+    return parsed_content
+
+def convert_bytes_to_markdown(file_bytes: bytes, suffix: str) -> str:
+    """Persist bytes to a temp file (with correct extension) and convert via Docling."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
+
+    try:
+        converter = DocumentConverter()
+        result = converter.convert(tmp_path)
+        document = result.document
+        return document.export_to_markdown()
+    finally:
+        # clean up the temp file
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+textual_retriever = None
+table_retriever = None
+
+
+def get_text_retriever(text: str):
+    global textual_retriever
+    if textual_retriever is None:
+        docs = [Document(page_content=text, metadata={"source": "inline"})]
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        docs = text_splitter.split_documents(docs)
+        embeddings = init_embeddings("openai:text-embedding-3-large", api_key = OPENAI_API_KEY)
+        vectorstore = InMemoryVectorStore.from_documents(documents=docs, embedding=embeddings)
+        textual_retriever = vectorstore.as_retriever()
+    
+    return textual_retriever
+
+def get_table_retriever(tables_md: list[str]):
+    global table_retriever
+    if table_retriever is None:
+        docs = [Document(page_content=tbl, metadata={"chunk_type": "table", "table_index": i})
+        for i, tbl in enumerate(tables_md)
+        ]
+
+        embeddings = init_embeddings("openai:text-embedding-3-large", api_key = OPENAI_API_KEY)
+        vectorstore = InMemoryVectorStore.from_documents(documents=docs, embedding=embeddings)
+        table_retriever = vectorstore.as_retriever()
+    
+    return table_retriever
+
+def get_context(query, retriever):
+    results = retriever.invoke(query)
+    docs = "\n\n".join(doc.page_content for doc in results)
+    return docs
+
+
+

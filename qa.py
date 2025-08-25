@@ -37,30 +37,30 @@ async def get_questions_answers(call_data):
     return response
 
 
-async def get_context_answers(url, ques):
+async def get_context_answers(question, context):
 
     prompt = f"""You are tasked with answering the following questions strictly based on the provided context.  
 
                 - Use only the information contained in the context.  
                 - If the answer to a question is not explicitly available in the context, respond exactly with:  
-                  "Answer not present in given context".  
+                  "Answer not present in given context" without any additional information. 
                 - Do NOT alter, rephrase, or interpret the given questions in any way.  
-                - Keep your answers brief and directly tied to the context.  
-
-                Context (source content):  
-                \n\n{fetch_webpage_as_markdown(url)}\n\n  
+                - Keep your answers brief and directly tied to the context.
 
                 Questions:  
-                \n\n{ques}\n\n
+                \n\n{question}\n\n  
+
+                Context:  
+                \n\n{context}\n\n  
                 """
 
     messages = [
         SystemMessage(prompt)
     ]
 
-    llm = ChatOpenAI(model="gpt-4o").with_structured_output(MultipleQuestionsAnswers).with_retry(stop_after_attempt=3)
+    llm = ChatOpenAI(model="gpt-4o")
     response = await llm.ainvoke(messages)
-    return response
+    return response.content
 
 async def get_hk_chatbot_answer(query):
     chat_url = "https://api.dify.ai/v1/chat-messages"

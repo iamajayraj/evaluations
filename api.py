@@ -1,5 +1,6 @@
 from operator import le
-from fastapi import FastAPI, Depends, Request, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Depends, Request, HTTPException, BackgroundTasks, UploadFile, File, Form
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List
@@ -8,12 +9,15 @@ import httpx
 from urllib.parse import urlparse
 import os
 from dotenv import load_dotenv
+from starlette.responses import Content
 from qa import get_questions_answers, get_context_answers, get_hk_chatbot_answer
 from evaluators import hallucination
 from metrics import get_metrics
 from silence import get_silence_time
 import warnings
 from pydantic.json_schema import PydanticJsonSchemaWarning
+from document_processor import convert_bytes_to_markdown, parse_pdf, get_text_retriever, get_table_retriever, get_context
+
 
 warnings.filterwarnings("ignore", category=PydanticJsonSchemaWarning)
 
@@ -49,8 +53,23 @@ app.add_middleware(
 class CallPayload(BaseModel):
     limit: int = Field(gt=0, le=200, description="Max calls to fetch (1-200)")
     agent_id: str = Field(min_length=1, description="Retell agent id")
-    duration_min: int = Field(gt=60, description="Min duration in seconds")
+    duration_min: int = Field(gt=59, description="Min duration in seconds")
     duration_max: int = Field(le=1200, description="Max duration in seconds")
+
+    @classmethod
+    def as_form(
+        cls,
+        limit: int = Form(...),
+        agent_id: str = Form(...),
+        duration_min: int = Form(...),
+        duration_max: int = Form(...),
+    ):
+        return cls(
+            limit=limit,
+            agent_id=agent_id,
+            duration_min=duration_min,
+            duration_max=duration_max,
+        )
 
 # ---- Fake data fetcher (replace with your real get_calls) ----
 async def get_calls(limit: int, agent_id: str, duration_min: int, duration_max: int) -> List[Dict[str, Any]]:
@@ -234,7 +253,89 @@ async def metrics(payload: CallPayload):
 
     return final_payload
 
+ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".pdf", ".docx"}
 
+@app.post("/factual-correctness")
+async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file: UploadFile = File(...)):
 
+    filename = file.filename
+    extension = os.path.splitext(filename)[1].lower()
 
+    if extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file format '{extension}'. Allowed formats: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
 
+    # Read file content into memory
+    content = await file.read()
+
+    # Validate content
+    if not content or len(content) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded file is empty or content not available"
+        )
+
+    # Your logic; example returns first item
+    batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max)
+    tasks = [get_questions_answers(call_data) for call_data in batch]
+    results = await asyncio.gather(*tasks)
+    if not results:
+        raise HTTPException(status_code=404, detail="No calls found")
+
+    batch_ques_ans = [
+    {"call_id": call_data["call_id"], "qa_pairs": qa_pairs}
+    for call_data, qa_pairs in zip(batch, results)
+    ]
+
+    questions_answers = {"questions":[], "answers": [], "contextual_answers": [], "retrieved_context": []}
+
+    for call in batch_ques_ans:
+        for item in call["qa_pairs"].items:
+            questions_answers["questions"].append(item.question)
+            questions_answers["answers"].append(item.answer)
+
+    if extension == ".pdf":
+        full_text = ""
+        for page in parse_pdf(content):
+            page_text = page["page_text"] + "\n\n"
+            full_text += page_text
+        text_retriever = get_text_retriever(full_text)
+
+        tables = []
+        for page in parse_pdf(content):
+            for table in page["page_tables"]:
+                tables.append(table["table"])
+        table_retriever = get_table_retriever(tables)
+
+        for question in questions_answers["questions"]:
+            textual_context = get_context(question, text_retriever)
+            tabular_context = get_context(question, table_retriever)
+
+            full_context = textual_context + "\n\n" + tabular_context
+
+            context_answer = await get_context_answers(question, full_context)
+
+            questions_answers["contextual_answers"].append(context_answer)
+            questions_answers["retrieved_context"].append(full_context)
+            
+        return questions_answers
+
+    elif extension in [".csv", ".xlsx"]:
+        md_text = convert_bytes_to_markdown(content, extension)
+        columns = md_text.split("\n")[0]
+        text_retriever = get_text_retriever(md_text)
+
+        for question in questions_answers["questions"]:
+            textual_context = get_context(question, text_retriever)
+
+            full_context = columns + "\n\n" + textual_context
+            print(full_context)
+
+            context_answer = await get_context_answers(question, full_context)
+
+            questions_answers["contextual_answers"].append(context_answer)
+            questions_answers["retrieved_context"].append(full_context)
+
+        return questions_answers

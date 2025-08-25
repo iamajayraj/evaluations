@@ -5,3 +5,6 @@ fastapi
 uvicorn
 httpx
 openevals
+pymupdf
+docling
+python-multipart
