@@ -1,7 +1,7 @@
 import fitz  # PyMuPDF
-import tempfile
 import os
-from docling.document_converter import DocumentConverter
+import pandas as pd
+from io import BytesIO
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.embeddings import init_embeddings
 from langchain_core.vectorstores import InMemoryVectorStore
@@ -64,23 +64,15 @@ def parse_pdf(file_bytes: bytes):
 
     return parsed_content
 
-def convert_bytes_to_markdown(file_bytes: bytes, suffix: str) -> str:
-    """Persist bytes to a temp file (with correct extension) and convert via Docling."""
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(file_bytes)
-        tmp_path = tmp.name
-
-    try:
-        converter = DocumentConverter()
-        result = converter.convert(tmp_path)
-        document = result.document
-        return document.export_to_markdown()
-    finally:
-        # clean up the temp file
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
+def bytes_to_markdown(file_bytes: bytes, suffix: str):
+    "Convert excel and csv files to markdown tables."
+    if suffix in [".xls", ".xlsx"]:
+        df = pd.read_excel(BytesIO(file_bytes))
+        return df.to_markdown(index=False, tablefmt="github")
+    
+    elif suffix == ".csv":
+        df = pd.read_csv(BytesIO(file_bytes))
+        return df.to_markdown(index=False, tablefmt="github")
 
 textual_retriever = None
 table_retriever = None

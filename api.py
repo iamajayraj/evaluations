@@ -16,7 +16,7 @@ from metrics import get_metrics
 from silence import get_silence_time
 import warnings
 from pydantic.json_schema import PydanticJsonSchemaWarning
-from document_processor import convert_bytes_to_markdown, parse_pdf, get_text_retriever, get_table_retriever, get_context
+from document_processor import bytes_to_markdown, parse_pdf, get_text_retriever, get_table_retriever, get_context
 
 
 warnings.filterwarnings("ignore", category=PydanticJsonSchemaWarning)
@@ -253,7 +253,7 @@ async def metrics(payload: CallPayload):
 
     return final_payload
 
-ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".pdf", ".docx"}
+ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".pdf"}
 
 @app.post("/factual-correctness")
 async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file: UploadFile = File(...)):
@@ -264,7 +264,7 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
     if extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid file format '{extension}'. Allowed formats: {', '.join(ALLOWED_EXTENSIONS)}"
+            detail=f"Upload file with a valid file format. Allowed formats: {', '.join(ALLOWED_EXTENSIONS)}"
         )
 
     # Read file content into memory
@@ -322,8 +322,8 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
             
         return questions_answers
 
-    elif extension in [".csv", ".xlsx"]:
-        md_text = convert_bytes_to_markdown(content, extension)
+    elif extension in [".csv", ".xlsx", ".xls"]:
+        md_text = bytes_to_markdown(content, extension)
         columns = md_text.split("\n")[0]
         text_retriever = get_text_retriever(md_text)
 
@@ -331,7 +331,6 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
             textual_context = get_context(question, text_retriever)
 
             full_context = columns + "\n\n" + textual_context
-            print(full_context)
 
             context_answer = await get_context_answers(question, full_context)
 
