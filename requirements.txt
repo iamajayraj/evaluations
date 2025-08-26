@@ -8,3 +8,4 @@ openevals
 pymupdf
 python-multipart
 pandas
+openpyxl
