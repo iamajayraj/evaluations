@@ -16,7 +16,7 @@ from metrics import get_metrics
 from silence import get_silence_time
 import warnings
 from pydantic.json_schema import PydanticJsonSchemaWarning
-from document_processor import bytes_to_markdown, parse_pdf, get_text_retriever, get_table_retriever, get_context
+from document_processor import bytes_to_markdown, parse_pdf, get_text_retriever, get_table_retriever, get_context, parse_docx
 
 
 warnings.filterwarnings("ignore", category=PydanticJsonSchemaWarning)
@@ -253,7 +253,7 @@ async def metrics(payload: CallPayload):
 
     return final_payload
 
-ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".pdf"}
+ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".pdf", ".docx"}
 
 @app.post("/factual-correctness")
 async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file: UploadFile = File(...)):
@@ -320,6 +320,20 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
             questions_answers["contextual_answers"].append(context_answer)
             questions_answers["retrieved_context"].append(full_context)
             
+        return questions_answers
+
+    elif extension == ".docx":
+        full_text = parse_docx(content)
+        text_retriever = get_text_retriever(full_text)
+
+        for question in questions_answers["questions"]:
+            textual_context = get_context(question, text_retriever)
+
+            context_answer = await get_context_answers(question, textual_context)
+
+            questions_answers["contextual_answers"].append(context_answer)
+            questions_answers["retrieved_context"].append(textual_context)
+
         return questions_answers
 
     elif extension in [".csv", ".xlsx", ".xls"]:

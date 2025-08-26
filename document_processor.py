@@ -6,6 +6,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.embeddings import init_embeddings
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_core.documents import Document
+from docx import Document as DocxDocument
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -63,6 +64,11 @@ def parse_pdf(file_bytes: bytes):
         })
 
     return parsed_content
+
+def parse_docx(file_bytes):
+    doc = DocxDocument(BytesIO(file_bytes))
+    return "\n\n".join(p.text for p in doc.paragraphs)
+
 
 def bytes_to_markdown(file_bytes: bytes, suffix: str):
     "Convert excel and csv files to markdown tables."
