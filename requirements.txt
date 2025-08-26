@@ -9,3 +9,4 @@ pymupdf
 python-multipart
 pandas
 openpyxl
+tabulate
