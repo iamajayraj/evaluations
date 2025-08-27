@@ -162,16 +162,20 @@ async def correctness(payload: CallPayload):
 
 @app.post("/metrics")
 async def metrics(payload: CallPayload):
-    new_batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max, payload.to_number)
+    main_batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max, payload.to_number)
 
-    batch = []
-    for call_data in new_batch:
+    batch_id_batch = []
+    for call_data in main_batch:
         if "batch_call_id" in call_data:
             if call_data["batch_call_id"] == payload.batch_id:
+                batch_id_batch.append(call_data)
+
+    batch = []
+    for call_data in batch_id_batch:
+        if "in_voicemail" in call_data["call_analysis"]:
+            if call_data["call_analysis"]["in_voicemail"] == False:
                 batch.append(call_data)
 
-    
-    
     final_payload = {}
     final_payload["call_id"] = [call_data["call_id"] for call_data in batch]
 
