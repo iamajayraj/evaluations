@@ -51,10 +51,12 @@ app.add_middleware(
 )
 
 class CallPayload(BaseModel):
-    limit: int = Field(gt=0, le=200, description="Max calls to fetch (1-200)")
+    limit: int = Field(gt=0, le=1001, description="Max calls to fetch (1-1000)")
     agent_id: str = Field(min_length=1, description="Retell agent id")
     duration_min: int = Field(gt=59, description="Min duration in seconds")
     duration_max: int = Field(le=1200, description="Max duration in seconds")
+    to_number: List[str] = Field(min_length=0, description="List of phone numbers to fetch calls")
+    batch_id: str = Field(min_length=1, description="Retell batch id")
 
     @classmethod
     def as_form(
@@ -63,16 +65,20 @@ class CallPayload(BaseModel):
         agent_id: str = Form(...),
         duration_min: int = Form(...),
         duration_max: int = Form(...),
+        to_number: List[str] = Form(...),
+        batch_id: str = Form(...),
     ):
         return cls(
             limit=limit,
             agent_id=agent_id,
             duration_min=duration_min,
             duration_max=duration_max,
+            to_number=to_number,
+            batch_id=batch_id,
         )
 
 # ---- Fake data fetcher (replace with your real get_calls) ----
-async def get_calls(limit: int, agent_id: str, duration_min: int, duration_max: int) -> List[Dict[str, Any]]:
+async def get_calls(limit: int, agent_id: str, duration_min: int, duration_max: int, to_number: List[str]) -> List[Dict[str, Any]]:
     # do your http/db fetch here
     """Fetches calls from Retell API."""
 
@@ -80,6 +86,7 @@ async def get_calls(limit: int, agent_id: str, duration_min: int, duration_max: 
         "sort_order" : "descending",
         "limit": int(limit),
         "filter_criteria": {
+            "to_number": to_number,
             "agent_id": [agent_id],
             "call_status": ["ended"],
             "disconnection_reason": ["user_hangup","agent_hangup","call_transfer"],
@@ -108,7 +115,7 @@ def index():
 @app.post("/correctness")
 async def correctness(payload: CallPayload):
     # Your logic; example returns first item
-    batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max)
+    batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max, payload.to_number)
     tasks = [get_questions_answers(call_data) for call_data in batch]
     results = await asyncio.gather(*tasks)
     if not results:
@@ -155,7 +162,15 @@ async def correctness(payload: CallPayload):
 
 @app.post("/metrics")
 async def metrics(payload: CallPayload):
-    batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max)
+    new_batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max, payload.to_number)
+
+    batch = []
+    for call_data in new_batch:
+        if "batch_call_id" in call_data:
+            if call_data["batch_call_id"] == payload.batch_id:
+                batch.append(call_data)
+
+    
     
     final_payload = {}
     final_payload["call_id"] = [call_data["call_id"] for call_data in batch]
