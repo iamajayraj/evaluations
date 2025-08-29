@@ -76,7 +76,8 @@ This is the input transcription between the user and agent: \n\n {transcript} \n
 
 ### **4. Out-of-Scope Queries**
 
-**Definition:** Count and list user queries the bot wasn’t trained to handle.
+**Definition:** Those user questions the bot wasn’t trained to handle. Strictly consider information seeking questions only
+where user is asking for some form of information that is unavailable to the agent.
 
 * Mark as out-of-scope if the agent gives an unrelated answer, says it doesn’t know, or avoids the question.
 
@@ -84,10 +85,11 @@ This is the input transcription between the user and agent: \n\n {transcript} \n
 
 ### **5. Escalation Reason**
 
-**Definition:** When the voice agent had to transfer the call to a human due to uer request, confusion, error, or user dissatisfaction..
+**Definition:** When the voice agent had to transfer the call to a human due to user request, confusion, error, or user dissatisfaction..
 
 * Mark as call escalated if the agent transfers the call to a human agent. 
 * Assign a category based on the reason behind the call transfer. Also, extract the user query in context complete form which led the call transfer.
+* If no call transfer occurred, assign 'Not Applicable' to escalation_category and 'No Call Transfer' to escalation_reason.
 
 ---
 
@@ -118,7 +120,7 @@ This is the input transcription between the user and agent: \n\n {transcript} \n
     }}
     ,
   "out_of_scope_queries": [
-      "<user utterance in fully-resolved context complete form that was out-of-scope>"
+      "<user query in fully-resolved context complete form that was out-of-scope>"
     ],
   "escalation": {{
       "escalation_category":"<Category of the reason behind call transfer, assign 'Not Applicable' if no call transfer>",

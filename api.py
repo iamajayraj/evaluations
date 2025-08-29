@@ -1,15 +1,13 @@
-from operator import le
 from fastapi import FastAPI, Depends, Request, HTTPException, BackgroundTasks, UploadFile, File, Form
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Any, Dict, List
+from typing import Dict, List, Optional
 import asyncio
-import httpx
 from urllib.parse import urlparse
 import os
+import ast
 from dotenv import load_dotenv
-from starlette.responses import Content
+from utils import get_calls, filter_voicemail_calls
 from qa import get_questions_answers, get_context_answers, get_hk_chatbot_answer
 from evaluators import hallucination
 from metrics import get_metrics
@@ -20,22 +18,6 @@ from document_processor import bytes_to_markdown, parse_pdf, get_text_retriever,
 
 
 warnings.filterwarnings("ignore", category=PydanticJsonSchemaWarning)
-
-load_dotenv()
-
-
-RETELL_BASE_URL = os.getenv("RETELL_BASE_URL")
-RETELL_API_KEY = os.getenv("RETELL_API_KEY")
-
-# --- ENV VALIDATION ---
-if not RETELL_BASE_URL:
-    raise RuntimeError("RETELL_BASE_URL is missing")
-parsed = urlparse(RETELL_BASE_URL)
-if not parsed.scheme or parsed.scheme not in {"http", "https"}:
-    raise RuntimeError("RETELL_BASE_URL must start with http:// or https://")
-
-if not RETELL_API_KEY:
-    raise RuntimeError("RETELL_API_KEY is missing")
 
 
 
@@ -53,10 +35,9 @@ app.add_middleware(
 class CallPayload(BaseModel):
     limit: int = Field(gt=0, le=1001, description="Max calls to fetch (1-1000)")
     agent_id: str = Field(min_length=1, description="Retell agent id")
-    duration_min: int = Field(gt=59, description="Min duration in seconds")
+    duration_min: int = Field(gt=19, description="Min duration in seconds")
     duration_max: int = Field(le=1200, description="Max duration in seconds")
-    to_number: List[str] = Field(min_length=0, description="List of phone numbers to fetch calls")
-    batch_id: str = Field(min_length=1, description="Retell batch id")
+    batch_ids: Optional[List[str]] = Field(default=[], description="Retell batch ids list")
 
     @classmethod
     def as_form(
@@ -65,48 +46,25 @@ class CallPayload(BaseModel):
         agent_id: str = Form(...),
         duration_min: int = Form(...),
         duration_max: int = Form(...),
-        to_number: List[str] = Form(...),
-        batch_id: str = Form(...),
+        batch_ids: Optional[str] = Form(""),
     ):
+        # Convert batch_ids from string to list if provided
+        batch_ids_list = []
+
+        if batch_ids:
+                # Use ast.literal_eval to safely parse Python literals
+                batch_ids_list = ast.literal_eval(batch_ids)
+        else:
+            batch_ids_list = []                
+
         return cls(
             limit=limit,
             agent_id=agent_id,
             duration_min=duration_min,
             duration_max=duration_max,
-            to_number=to_number,
-            batch_id=batch_id,
+            batch_ids=batch_ids_list,
         )
 
-# ---- Fake data fetcher (replace with your real get_calls) ----
-async def get_calls(limit: int, agent_id: str, duration_min: int, duration_max: int, to_number: List[str]) -> List[Dict[str, Any]]:
-    # do your http/db fetch here
-    """Fetches calls from Retell API."""
-
-    payload = {
-        "sort_order" : "descending",
-        "limit": int(limit),
-        "filter_criteria": {
-            "to_number": to_number,
-            "agent_id": [agent_id],
-            "call_status": ["ended"],
-            "disconnection_reason": ["user_hangup","agent_hangup","call_transfer"],
-            "duration_ms": {
-                "upper_threshold": int(duration_max)*1000,
-                "lower_threshold": int(duration_min)*1000
-            }
-        }
-    }
-
-    headers = {"authorization": f"Bearer {RETELL_API_KEY}",
-           "Content-Type": "application/json"}
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(f"{RETELL_BASE_URL}/v2/list-calls", headers=headers, json=payload)
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        raise Exception(f"Failed to fetch call: {response.status_code} - {response.text}")
 
 @app.get("/")
 def index():
@@ -115,7 +73,7 @@ def index():
 @app.post("/correctness")
 async def correctness(payload: CallPayload):
     # Your logic; example returns first item
-    batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max, payload.to_number)
+    batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max, payload.batch_ids)
     tasks = [get_questions_answers(call_data) for call_data in batch]
     results = await asyncio.gather(*tasks)
     if not results:
@@ -162,19 +120,9 @@ async def correctness(payload: CallPayload):
 
 @app.post("/metrics")
 async def metrics(payload: CallPayload):
-    main_batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max, payload.to_number)
-
-    batch_id_batch = []
-    for call_data in main_batch:
-        if "batch_call_id" in call_data:
-            if call_data["batch_call_id"] == payload.batch_id:
-                batch_id_batch.append(call_data)
-
-    batch = []
-    for call_data in batch_id_batch:
-        if "in_voicemail" in call_data["call_analysis"]:
-            if call_data["call_analysis"]["in_voicemail"] == False:
-                batch.append(call_data)
+    main_batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max, payload.batch_ids)
+    
+    batch = filter_voicemail_calls(main_batch)
 
     final_payload = {}
     final_payload["call_id"] = [call_data["call_id"] for call_data in batch]
@@ -297,7 +245,7 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
         )
 
     # Your logic; example returns first item
-    batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max)
+    batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max, payload.batch_ids)
     tasks = [get_questions_answers(call_data) for call_data in batch]
     results = await asyncio.gather(*tasks)
     if not results:
