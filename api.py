@@ -33,9 +33,9 @@ app.add_middleware(
 )
 
 class CallPayload(BaseModel):
-    limit: int = Field(gt=0, le=1001, description="Max calls to fetch (1-1000)")
+    limit: int = Field(gt=0, le=51, description="Max calls to fetch (1-50)")
     agent_id: str = Field(min_length=1, description="Retell agent id")
-    duration_min: int = Field(gt=19, description="Min duration in seconds")
+    duration_min: int = Field(gt=59, description="Min duration in seconds")
     duration_max: int = Field(le=1200, description="Max duration in seconds")
     batch_ids: Optional[List[str]] = Field(default=[], description="Retell batch ids list")
 
