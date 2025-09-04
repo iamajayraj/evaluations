@@ -51,4 +51,25 @@ def filter_voicemail_calls(calls):
     
     return new_batch
 
+def get_trasnscript_with_tool_calls(call_data):
+    transcript_with_tool_calls = ""
+
+    for utterance in call_data["transcript_with_tool_calls"]:
+        if utterance['role'] == 'tool_call_invocation':
+            tool_info = {
+                "tool_name": utterance["name"],
+                "arguments": utterance["arguments"]
+            }
+            transcript_with_tool_calls += f"\nTool Call Invoked: {tool_info}\n"
+            
+        elif utterance['role'] == 'tool_call_result':
+            tool_result = utterance['content']
+            transcript_with_tool_calls += f"Tool Call Result: {tool_result}\n"
+
+        elif utterance['role'] in ['user', 'agent']:
+            transcript_with_tool_calls += f"{utterance['role'].capitalize()}: {utterance['content']}\n"
+
+    return transcript_with_tool_calls
+
+
         

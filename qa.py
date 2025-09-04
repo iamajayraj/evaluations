@@ -8,7 +8,8 @@ import os
 import httpx
 import json
 
-from prompts import get_questions_answers_prompt
+from prompts import get_questions_answers_prompt, new_get_questions_answers_prompt, get_context_answers_prompt
+from utils import get_trasnscript_with_tool_calls
 
 load_dotenv()
 
@@ -21,12 +22,18 @@ class QuestionAnswer(BaseModel):
 class MultipleQuestionsAnswers(BaseModel):
     items: List[QuestionAnswer] = Field(..., description="List of all question-answer pairs")
 
+class ContextAnswer(BaseModel):
+    answer: str = Field(..., description="A short and concise answer to the question")
+    source_and_reasoning: str = Field(..., description="Source and reasoning for the answer")
+
 
 
 async def get_questions_answers(call_data):
     """Extracts questions and answers using the LLM."""
 
-    prompt = get_questions_answers_prompt.format(transcript=call_data["transcript"])
+    transcript = get_trasnscript_with_tool_calls(call_data)
+
+    prompt = new_get_questions_answers_prompt.format(transcript=transcript)
     
     messages = [
         SystemMessage(prompt)
@@ -39,28 +46,15 @@ async def get_questions_answers(call_data):
 
 async def get_context_answers(question, context):
 
-    prompt = f"""You are tasked with answering the following questions strictly based on the provided context.  
-
-                - Use only the information contained in the context.  
-                - If the answer to a question is not explicitly available in the context, respond exactly with:  
-                  "Answer not present in given context" without any additional information. 
-                - Do NOT alter, rephrase, or interpret the given questions in any way.  
-                - Keep your answers brief and directly tied to the context.
-
-                Questions:  
-                \n\n{question}\n\n  
-
-                Context:  
-                \n\n{context}\n\n  
-                """
+    prompt = get_context_answers_prompt.format(question=question, context=context)
 
     messages = [
         SystemMessage(prompt)
     ]
 
-    llm = ChatOpenAI(model="gpt-4o")
+    llm = ChatOpenAI(model="gpt-4o").with_structured_output(ContextAnswer).with_retry(stop_after_attempt=3)
     response = await llm.ainvoke(messages)
-    return response.content
+    return response
 
 async def get_hk_chatbot_answer(query):
     chat_url = "https://api.dify.ai/v1/chat-messages"
