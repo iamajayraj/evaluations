@@ -1,4 +1,5 @@
 import asyncio
+from langchain.chat_models import init_chat_model
 from langchain_openai import ChatOpenAI
 from langchain.schema import SystemMessage
 from dotenv import load_dotenv
@@ -12,8 +13,12 @@ from prompts import get_questions_answers_prompt, new_get_questions_answers_prom
 from utils import get_trasnscript_with_tool_calls
 
 load_dotenv()
-
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DIFY_API_KEY = os.getenv("DIFY_API_KEY")
+
+configurable_model = init_chat_model(
+    configurable_fields=("model", "api_key"),
+)
 
 class QuestionAnswer(BaseModel):
     question: str = Field(..., description="A fully-resolved, context-complete form question")
@@ -28,23 +33,36 @@ class ContextAnswer(BaseModel):
 
 
 
-async def get_questions_answers(call_data):
+async def get_questions_answers(model, call_data):
     """Extracts questions and answers using the LLM."""
 
     transcript = get_trasnscript_with_tool_calls(call_data)
 
     prompt = new_get_questions_answers_prompt.format(transcript=transcript)
+
+    model_config = {
+        "model": "gpt-4o",
+        "api_key": OPENAI_API_KEY
+    }
+
+    # Configure model with structured output and retry logic
+    qa_model = (
+        model
+        .with_structured_output(MultipleQuestionsAnswers)
+        .with_retry(stop_after_attempt=3)
+        .with_config(model_config)
+    )
     
     messages = [
         SystemMessage(prompt)
     ]
 
-    llm = ChatOpenAI(model="gpt-4o").with_structured_output(MultipleQuestionsAnswers).with_retry(stop_after_attempt=3)
-    response = await llm.ainvoke(messages)
+    #llm = ChatOpenAI(model="gpt-4o").with_structured_output(MultipleQuestionsAnswers).with_retry(stop_after_attempt=3)
+    response = await qa_model.ainvoke(messages)
     return response
 
 
-async def get_context_answers(question, context):
+async def get_context_answers(model, question, context):
 
     prompt = get_context_answers_prompt.format(question=question, context=context)
 
@@ -52,8 +70,21 @@ async def get_context_answers(question, context):
         SystemMessage(prompt)
     ]
 
-    llm = ChatOpenAI(model="gpt-4o").with_structured_output(ContextAnswer).with_retry(stop_after_attempt=3)
-    response = await llm.ainvoke(messages)
+    model_config = {
+        "model": "gpt-4o",
+        "api_key": OPENAI_API_KEY
+    }
+
+    # Configure model with structured output and retry logic
+    context_ans_model = (
+        model
+        .with_structured_output(ContextAnswer)
+        .with_retry(stop_after_attempt=3)
+        .with_config(model_config)
+    )
+
+    #llm = ChatOpenAI(model="gpt-4o").with_structured_output(ContextAnswer).with_retry(stop_after_attempt=3)
+    response = await context_ans_model.ainvoke(messages)
     return response
 
 async def get_hk_chatbot_answer(query):

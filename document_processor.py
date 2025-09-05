@@ -80,6 +80,22 @@ def bytes_to_markdown(file_bytes: bytes, suffix: str):
         df = pd.read_csv(BytesIO(file_bytes))
         return df.to_markdown(index=False, tablefmt="github")
 
+
+_text_embeddings = None
+_table_embeddings = None
+
+def get_text_embeddings():
+    global _text_embeddings
+    if _text_embeddings is None:
+        _text_embeddings = init_embeddings("openai:text-embedding-3-large", api_key=OPENAI_API_KEY)
+    return _text_embeddings
+
+def get_table_embeddings():
+    global _table_embeddings
+    if _table_embeddings is None:
+        _table_embeddings = init_embeddings("openai:text-embedding-3-large", api_key=OPENAI_API_KEY)
+    return _table_embeddings
+
 textual_retriever = None
 table_retriever = None
 
@@ -90,7 +106,7 @@ def get_text_retriever(text: str):
         docs = [Document(page_content=text, metadata={"source": "inline"})]
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         docs = text_splitter.split_documents(docs)
-        embeddings = init_embeddings("openai:text-embedding-3-large", api_key = OPENAI_API_KEY)
+        embeddings = get_text_embeddings()
         vectorstore = InMemoryVectorStore.from_documents(documents=docs, embedding=embeddings)
         textual_retriever = vectorstore.as_retriever()
     
@@ -103,7 +119,7 @@ def get_table_retriever(tables_md: list[str]):
         for i, tbl in enumerate(tables_md)
         ]
 
-        embeddings = init_embeddings("openai:text-embedding-3-large", api_key = OPENAI_API_KEY)
+        embeddings = get_table_embeddings()
         vectorstore = InMemoryVectorStore.from_documents(documents=docs, embedding=embeddings)
         table_retriever = vectorstore.as_retriever()
     

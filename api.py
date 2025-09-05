@@ -15,11 +15,13 @@ from silence import get_silence_time
 import warnings
 from pydantic.json_schema import PydanticJsonSchemaWarning
 from document_processor import bytes_to_markdown, parse_pdf, get_text_retriever, get_table_retriever, get_context, parse_docx
-
+from langchain.chat_models import init_chat_model
 
 warnings.filterwarnings("ignore", category=PydanticJsonSchemaWarning)
 
-
+configurable_model = init_chat_model(
+    configurable_fields=("model", "api_key"),
+)
 
 app = FastAPI()
 
@@ -69,53 +71,6 @@ class CallPayload(BaseModel):
 @app.get("/")
 def index():
     return {"message": "API TAKA-TAK KAAM KAR RHI HAI"}
-
-@app.post("/correctness")
-async def correctness(payload: CallPayload):
-    # Your logic; example returns first item
-    batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max, payload.batch_ids)
-    tasks = [get_questions_answers(call_data) for call_data in batch]
-    results = await asyncio.gather(*tasks)
-    if not results:
-        raise HTTPException(status_code=404, detail="No calls found")
-
-    batch_ques_ans = [
-    {"call_id": call_data["call_id"], "qa_pairs": qa_pairs}
-    for call_data, qa_pairs in zip(batch, results)
-    ]
-
-    questions_answers = {"questions":[], "answers": []}
-
-    for call in batch_ques_ans:
-        for item in call["qa_pairs"].items:
-            questions_answers["questions"].append(item.question)
-            questions_answers["answers"].append(item.answer)
-
-    all_answers = []
-    concurrent_limit = 10
-    for question in range(0, len(questions_answers["questions"]), concurrent_limit):
-        batch = questions_answers["questions"][question:question + concurrent_limit]
-        tasks = [get_hk_chatbot_answer(question) for question in batch]
-        results = await asyncio.gather(*tasks)
-        answers = [result["answer"] for result in results]
-        all_answers += answers
-
-    questions_answers["context_answers"] = all_answers
-
-    hallucination_result = []
-    for i in range(len(questions_answers["questions"])):
-        hal_res = hallucination(input=questions_answers["questions"][i], output=questions_answers["answers"][i], context=questions_answers["context_answers"][i])
-        score = hal_res["score"]
-        comment = hal_res["comment"]
-        hallucination_result.append({
-            "question": questions_answers["questions"][i],
-            "answer": questions_answers["answers"][i],
-            "context_answer": questions_answers["context_answers"][i],
-            "score": score, 
-            "comment": comment
-            })
-
-    return hallucination_result
 
 
 @app.post("/metrics")
@@ -246,7 +201,7 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
 
     # Your logic; example returns first item
     batch = await get_calls(payload.limit, payload.agent_id, payload.duration_min, payload.duration_max, payload.batch_ids)
-    tasks = [get_questions_answers(call_data) for call_data in batch]
+    tasks = [get_questions_answers(configurable_model, call_data) for call_data in batch]
     results = await asyncio.gather(*tasks)
     if not results:
         raise HTTPException(status_code=404, detail="No calls found")
@@ -265,15 +220,15 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
 
     if extension == ".pdf":
         full_text = ""
+        tables = []
         for page in parse_pdf(content):
             page_text = page["page_text"] + "\n\n"
             full_text += page_text
-        text_retriever = get_text_retriever(full_text)
-
-        tables = []
-        for page in parse_pdf(content):
             for table in page["page_tables"]:
                 tables.append(table["table"])
+        
+        
+        text_retriever = get_text_retriever(full_text)
         table_retriever = get_table_retriever(tables)
 
         for question in questions_answers["questions"]:
@@ -282,7 +237,7 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
 
             full_context = textual_context + "\n\n" + tabular_context
 
-            context_answer = await get_context_answers(question, full_context)
+            context_answer = await get_context_answers(configurable_model, question, full_context)
 
             questions_answers["contextual_answers"].append(context_answer)
             questions_answers["retrieved_context"].append(full_context)
@@ -296,7 +251,7 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
         for question in questions_answers["questions"]:
             textual_context = get_context(question, text_retriever)
 
-            context_answer = await get_context_answers(question, textual_context)
+            context_answer = await get_context_answers(configurable_model, question, textual_context)
 
             questions_answers["contextual_answers"].append(context_answer)
             questions_answers["retrieved_context"].append(textual_context)
@@ -313,7 +268,7 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
 
             full_context = columns + "\n\n" + textual_context
 
-            context_answer = await get_context_answers(question, full_context)
+            context_answer = await get_context_answers(configurable_model, question, full_context)
 
             questions_answers["contextual_answers"].append(context_answer)
             questions_answers["retrieved_context"].append(full_context)

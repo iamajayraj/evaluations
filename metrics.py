@@ -40,9 +40,6 @@ def get_calls(limit: int, agent_id: str, duration_min: int, duration_max: int):
         return response.json()
     else:
         raise Exception(f"Failed to fetch call: {response.status_code} - {response.text}")
-    
-batch_call_data = get_calls(limit=10, agent_id="agent_e7859230de6c1648c42295d8c9", duration_min=60, duration_max=1200)
-
 
 SentimentCategory = Literal["Positive", 
                              "Neutral", 
@@ -84,7 +81,7 @@ class SentimentAnalysis(BaseModel):
 
 class Escalation(BaseModel):
     escalation_category: CallTransferCategory = Field("Not Applicable", description="Category of the reason behind call transfer, assign 'Not Applicable' if no call transfer"),
-    escalation_reason: str = Field(..., description="User query in context complete form due to which the call was transferred")
+    escalation_reason: str = Field("No Call Transfer", description="User query in context complete form due to which the call was transferred")
 
 class MainClass(BaseModel):
     intent_accuracy: List[IntentDetection]
