@@ -220,26 +220,33 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
 
     if extension == ".pdf":
         full_text = ""
-        tables = []
         for page in parse_pdf(content):
             page_text = page["page_text"] + "\n\n"
             full_text += page_text
+        text_retriever = get_text_retriever(full_text)
+
+        tables = []
+        for page in parse_pdf(content):
             for table in page["page_tables"]:
                 tables.append(table["table"])
-        
-        
-        text_retriever = get_text_retriever(full_text)
         table_retriever = get_table_retriever(tables)
 
+        # Prepare context for each question
+        contexts = []
         for question in questions_answers["questions"]:
             textual_context = get_context(question, text_retriever)
             tabular_context = get_context(question, table_retriever)
-
             full_context = textual_context + "\n\n" + tabular_context
-
-            context_answer = await get_context_answers(configurable_model, question, full_context)
-
-            questions_answers["contextual_answers"].append(context_answer)
+            contexts.append((question, full_context))
+        
+        # Process all questions in parallel
+        context_tasks = [get_context_answers(configurable_model, question, context) 
+                         for question, context in contexts]
+        context_answers = await asyncio.gather(*context_tasks)
+        
+        # Organize results
+        for i, (_, full_context) in enumerate(contexts):
+            questions_answers["contextual_answers"].append(context_answers[i])
             questions_answers["retrieved_context"].append(full_context)
             
         return questions_answers
@@ -248,12 +255,20 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
         full_text = parse_docx(content)
         text_retriever = get_text_retriever(full_text)
 
+        # Prepare context for each question
+        contexts = []
         for question in questions_answers["questions"]:
             textual_context = get_context(question, text_retriever)
-
-            context_answer = await get_context_answers(configurable_model, question, textual_context)
-
-            questions_answers["contextual_answers"].append(context_answer)
+            contexts.append((question, textual_context))
+        
+        # Process all questions in parallel
+        context_tasks = [get_context_answers(configurable_model, question, context) 
+                         for question, context in contexts]
+        context_answers = await asyncio.gather(*context_tasks)
+        
+        # Organize results
+        for i, (_, textual_context) in enumerate(contexts):
+            questions_answers["contextual_answers"].append(context_answers[i])
             questions_answers["retrieved_context"].append(textual_context)
 
         return questions_answers
@@ -263,14 +278,21 @@ async def upload_file(payload: CallPayload = Depends(CallPayload.as_form), file:
         columns = md_text.split("\n")[0]
         text_retriever = get_text_retriever(md_text)
 
+        # Prepare context for each question
+        contexts = []
         for question in questions_answers["questions"]:
             textual_context = get_context(question, text_retriever)
-
             full_context = columns + "\n\n" + textual_context
-
-            context_answer = await get_context_answers(configurable_model, question, full_context)
-
-            questions_answers["contextual_answers"].append(context_answer)
+            contexts.append((question, full_context))
+        
+        # Process all questions in parallel
+        context_tasks = [get_context_answers(configurable_model, question, context) 
+                         for question, context in contexts]
+        context_answers = await asyncio.gather(*context_tasks)
+        
+        # Organize results
+        for i, (_, full_context) in enumerate(contexts):
+            questions_answers["contextual_answers"].append(context_answers[i])
             questions_answers["retrieved_context"].append(full_context)
 
         return questions_answers

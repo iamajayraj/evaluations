@@ -81,54 +81,51 @@ def bytes_to_markdown(file_bytes: bytes, suffix: str):
         return df.to_markdown(index=False, tablefmt="github")
 
 
-_text_embeddings = None
-_table_embeddings = None
-
-def get_text_embeddings():
-    global _text_embeddings
-    if _text_embeddings is None:
-        _text_embeddings = init_embeddings("openai:text-embedding-3-large", api_key=OPENAI_API_KEY)
-    return _text_embeddings
-
-def get_table_embeddings():
-    global _table_embeddings
-    if _table_embeddings is None:
-        _table_embeddings = init_embeddings("openai:text-embedding-3-large", api_key=OPENAI_API_KEY)
-    return _table_embeddings
-
-textual_retriever = None
-table_retriever = None
-
-
-def get_text_retriever(text: str):
-    global textual_retriever
-    if textual_retriever is None:
+class DocumentProcessor:
+    def __init__(self):
+        self._text_embeddings = None
+        self._table_embeddings = None
+        self.textual_retriever = None
+        self.table_retriever = None
+    
+    def get_text_embeddings(self):
+        if self._text_embeddings is None:
+            self._text_embeddings = init_embeddings("openai:text-embedding-3-small", api_key=OPENAI_API_KEY)
+        return self._text_embeddings
+    
+    def get_table_embeddings(self):
+        if self._table_embeddings is None:
+            self._table_embeddings = init_embeddings("openai:text-embedding-3-small", api_key=OPENAI_API_KEY)
+        return self._table_embeddings
+    
+    def get_text_retriever(self, text: str):
         docs = [Document(page_content=text, metadata={"source": "inline"})]
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         docs = text_splitter.split_documents(docs)
-        embeddings = get_text_embeddings()
+        embeddings = self.get_text_embeddings()
         vectorstore = InMemoryVectorStore.from_documents(documents=docs, embedding=embeddings)
-        textual_retriever = vectorstore.as_retriever()
+        self.textual_retriever = vectorstore.as_retriever()
+        return self.textual_retriever
     
-    return textual_retriever
-
-def get_table_retriever(tables_md: list[str]):
-    global table_retriever
-    if table_retriever is None:
+    def get_table_retriever(self, tables_md: list[str]):
         docs = [Document(page_content=tbl, metadata={"chunk_type": "table", "table_index": i})
         for i, tbl in enumerate(tables_md)
         ]
-
-        embeddings = get_table_embeddings()
+        embeddings = self.get_table_embeddings()
         vectorstore = InMemoryVectorStore.from_documents(documents=docs, embedding=embeddings)
-        table_retriever = vectorstore.as_retriever()
-    
-    return table_retriever
+        self.table_retriever = vectorstore.as_retriever()
+        return self.table_retriever
+
+
+def get_text_retriever(text: str):
+    processor = DocumentProcessor()
+    return processor.get_text_retriever(text)
+
+def get_table_retriever(tables_md: list[str]):
+    processor = DocumentProcessor()
+    return processor.get_table_retriever(tables_md)
 
 def get_context(query, retriever):
     results = retriever.invoke(query)
     docs = "\n\n".join(doc.page_content for doc in results)
     return docs
-
-
-
